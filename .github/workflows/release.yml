@@ -1,0 +1,28 @@
+# Pushing a tag like v1.0 builds the disk image and publishes it as a GitHub release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the app version
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist)
+          [ "$GITHUB_REF_NAME" = "v$VERSION" ] || { echo "Tag $GITHUB_REF_NAME doesn't match version $VERSION in Resources/Info.plist"; exit 1; }
+
+      - name: Build
+        run: scripts/release.sh
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/Stopwatch-*.dmg --title "Stopwatch ${GITHUB_REF_NAME#v}" --generate-notes
