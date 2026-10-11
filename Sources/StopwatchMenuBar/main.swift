@@ -262,14 +262,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var clickModeItems: [NSMenuItem] = []
     private let millisecondsItem = NSMenuItem()
     private let doubleClickResetItem = NSMenuItem()
-    private let blinkMenu = NSMenu()
-    private let customTimerItem = NSMenuItem()
+    // Timer and Play Sound appear in both the menu bar menu and the floating stopwatch's menu;
+    // a submenu can only belong to one menu, so each place gets its own copy
+    private var timerMenus: [NSMenu] = []
+    private var customTimerItems: [NSMenuItem] = []
     private var customTimerLabel: NSTextField?
     // slider stops for a custom timer: every 5 seconds up to 5 minutes, then every minute up to an hour
     private static let customTimerValues = Array(stride(from: 5, to: 300, by: 5)) + Array(stride(from: 300, through: 3600, by: 60))
     private let floatingItem = NSMenuItem()
-    private let alertSoundItem = NSMenuItem()
-    private let alertSoundMenu = NSMenu()
+    private var alertSoundItems: [NSMenuItem] = []
+    private var alertSoundMenus: [NSMenu] = []
     private var previewSound: NSSound?
     private var alertDone = false // time-up sound already played for the current run past the alert time
     private let floatingResetItem = NSMenuItem()
@@ -379,6 +381,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         resetItem.title = "Reset Stopwatch"
         resetItem.action = #selector(resetAction)
         menu.addItem(resetItem)
+        // the saved tone is gone from this macOS: switch the setting to Ping
+        if !Self.alertSounds.contains(where: { $0.1 == alertSound }) { alertSound = "Ping" }
+        addTimerAndSoundItems(to: menu)
         menu.addItem(.separator())
         for (title, subtitle, tag) in [("Click to Start from Zero", "⌥+click to resume", 1),
                                        ("Click to Start or Resume", "⌥+click to start from zero", 0)] {
@@ -389,38 +394,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(item)
             clickModeItems.append(item)
         }
-        menu.addItem(.separator())
-        for seconds in Self.blinkOptions {
-            let item = NSMenuItem(title: Self.blinkLabel(seconds), action: #selector(selectBlinkAfter), keyEquivalent: "")
-            item.tag = seconds
-            item.target = self
-            blinkMenu.addItem(item)
-            if seconds == 0 {
-                // None, then Custom, then the presets
-                customTimerItem.action = #selector(customTimer)
-                customTimerItem.target = self
-                blinkMenu.addItem(customTimerItem)
-                blinkMenu.addItem(.separator())
-            }
-        }
-        updateTimerCheckmarks()
-        let blinkItem = NSMenuItem(title: "Timer", action: nil, keyEquivalent: "")
-        blinkItem.attributedTitle = Self.titleWithHint("Timer", "When time's up, stopwatch will turn red")
-        blinkItem.submenu = blinkMenu
-        menu.addItem(blinkItem)
-        for (title, name) in Self.alertSounds {
-            let item = NSMenuItem(title: title, action: #selector(selectAlertSound), keyEquivalent: "")
-            item.representedObject = name
-            item.target = self
-            alertSoundMenu.addItem(item)
-            if name.isEmpty { alertSoundMenu.addItem(.separator()) } // after None
-        }
-        alertSoundMenu.delegate = self // previews each sound as it's hovered
-        // the saved tone is gone from this macOS: switch the setting to Ping
-        if !Self.alertSounds.contains(where: { $0.1 == alertSound }) { alertSound = "Ping" }
-        alertSoundItem.title = "Play Sound"
-        alertSoundItem.submenu = alertSoundMenu
-        menu.addItem(alertSoundItem)
         menu.addItem(.separator())
         floatingItem.attributedTitle = Self.titleWithHint("Show Floating Stopwatch", "Right-click it to customize")
         floatingItem.action = #selector(toggleFloating)
@@ -449,6 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let floatingMenu = NSMenu()
         floatingResetItem.action = #selector(resetAction)
         floatingMenu.addItem(floatingResetItem)
+        addTimerAndSoundItems(to: floatingMenu)
         floatingMenu.addItem(.separator())
         // Translucent Blur needs macOS 26: hide it before that, and move a saved choice to Dark Background
         let glassAvailable: Bool
@@ -534,15 +508,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return NSSound(contentsOf: toneLibrary.appendingPathComponent(name + ".caf"), byReference: true)
     }
 
+    private func addTimerAndSoundItems(to menu: NSMenu) {
+        let timerMenu = NSMenu()
+        for seconds in Self.blinkOptions {
+            let item = NSMenuItem(title: Self.blinkLabel(seconds), action: #selector(selectBlinkAfter), keyEquivalent: "")
+            item.tag = seconds
+            item.target = self
+            timerMenu.addItem(item)
+            if seconds == 0 {
+                // None, then Custom, then the presets
+                let custom = NSMenuItem(title: "Custom…", action: #selector(customTimer), keyEquivalent: "")
+                custom.target = self
+                timerMenu.addItem(custom)
+                timerMenu.addItem(.separator())
+                customTimerItems.append(custom)
+            }
+        }
+        timerMenus.append(timerMenu)
+        let timerItem = NSMenuItem(title: "Timer", action: nil, keyEquivalent: "")
+        timerItem.attributedTitle = Self.titleWithHint("Timer", "When time's up, stopwatch will turn red")
+        timerItem.submenu = timerMenu
+        menu.addItem(timerItem)
+
+        let soundMenu = NSMenu()
+        for (title, name) in Self.alertSounds {
+            let item = NSMenuItem(title: title, action: #selector(selectAlertSound), keyEquivalent: "")
+            item.representedObject = name
+            item.target = self
+            soundMenu.addItem(item)
+            if name.isEmpty { soundMenu.addItem(.separator()) } // after None
+        }
+        soundMenu.delegate = self // previews each sound as it's hovered
+        alertSoundMenus.append(soundMenu)
+        let soundItem = NSMenuItem(title: "Play Sound", action: nil, keyEquivalent: "")
+        soundItem.submenu = soundMenu
+        menu.addItem(soundItem)
+        alertSoundItems.append(soundItem)
+        updateTimerCheckmarks()
+    }
+
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
-        guard menu === alertSoundMenu else { return }
+        guard alertSoundMenus.contains(where: { $0 === menu }) else { return }
         previewSound?.stop()
         previewSound = (item?.representedObject as? String).flatMap(Self.sound)
         previewSound?.play()
     }
 
     func menuDidClose(_ menu: NSMenu) {
-        if menu === alertSoundMenu {
+        if alertSoundMenus.contains(where: { $0 === menu }) {
             previewSound?.stop()
             return
         }
@@ -684,8 +697,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateCustomizeCheckmarks() {
         // green to red counts toward the flash time; without one, fall back to gray
         if blinkAfter == 0 { floatingColor = 0 }
-        alertSoundItem.isEnabled = blinkAfter > 0
-        for item in alertSoundMenu.items { item.state = item.representedObject as? String == alertSound ? .on : .off }
+        for item in alertSoundItems { item.isEnabled = blinkAfter > 0 }
+        for item in alertSoundMenus.flatMap(\.items) { item.state = item.representedObject as? String == alertSound ? .on : .off }
         for item in customizeMenu.items where !item.isSeparatorItem {
             let selected: Bool
             switch item.action {
@@ -769,11 +782,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateTimerCheckmarks() {
         let isPreset = Self.blinkOptions.contains(blinkAfter)
-        for item in blinkMenu.items where item.action == #selector(selectBlinkAfter) {
+        for item in timerMenus.flatMap(\.items) where item.action == #selector(selectBlinkAfter) {
             item.state = item.tag == blinkAfter ? .on : .off
         }
-        customTimerItem.state = isPreset ? .off : .on
-        customTimerItem.title = isPreset ? "Custom…" : "Custom: \(Self.blinkLabel(blinkAfter))"
+        for item in customTimerItems {
+            item.state = isPreset ? .off : .on
+            item.title = isPreset ? "Custom…" : "Custom: \(Self.blinkLabel(blinkAfter))"
+        }
     }
 
     @objc private func customTimer() {
