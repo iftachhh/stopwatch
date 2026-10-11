@@ -509,6 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func addTimerAndSoundItems(to menu: NSMenu) {
+        menu.addItem(.separator()) // between Reset and Timer
         let timerMenu = NSMenu()
         for seconds in Self.blinkOptions {
             let item = NSMenuItem(title: Self.blinkLabel(seconds), action: #selector(selectBlinkAfter), keyEquivalent: "")
