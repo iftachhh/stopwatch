@@ -290,6 +290,7 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
         // the seconds stepper only reports a direction (one past either end); stepped() decides the step size
         secondsStepper.minValue = -1
         secondsStepper.maxValue = 60
+        minutesStepper.minValue = -1 // so "−" still registers under a minute (and clears it)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -306,7 +307,8 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
     @objc private func stepped(_ sender: NSStepper) {
         var total = minutes.integerValue * 60 + seconds.integerValue
         if sender === minutesStepper {
-            total = minutesStepper.integerValue * 60 + seconds.integerValue
+            // under a minute, minutes "−" clears the seconds
+            total = minutesStepper.integerValue < 0 ? 0 : minutesStepper.integerValue * 60 + seconds.integerValue
         } else {
             total = Self.stepSeconds(total, up: secondsStepper.integerValue > seconds.integerValue)
         }
