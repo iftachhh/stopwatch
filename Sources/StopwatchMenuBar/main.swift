@@ -578,15 +578,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             timerMenu.addItem(item)
             if seconds == 0 {
                 // None, then Custom, then the presets
-                let custom = NSMenuItem(title: "Custom…", action: nil, keyEquivalent: "")
+                // the editor sits right in the Timer menu (a further submenu could open over the main menu)
+                let custom = NSMenuItem(title: "Custom", action: nil, keyEquivalent: "")
                 let editor = CustomTimerView()
                 editor.onSet = { [weak self] seconds in self?.setTimer(seconds) }
                 let editorItem = NSMenuItem()
                 editorItem.view = editor
-                custom.submenu = NSMenu()
-                custom.submenu?.addItem(editorItem)
                 customTimerViews.append(editor)
                 timerMenu.addItem(custom)
+                timerMenu.addItem(editorItem)
                 timerMenu.addItem(.separator())
                 customTimerItems.append(custom)
             }
@@ -854,7 +854,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         for item in customTimerItems {
             item.state = isPreset ? .off : .on
-            item.title = isPreset ? "Custom…" : "Custom: \(Self.blinkLabel(blinkAfter))"
+            item.title = isPreset ? "Custom" : "Custom: \(Self.blinkLabel(blinkAfter))"
         }
         for view in customTimerViews { view.show(blinkAfter) }
     }
