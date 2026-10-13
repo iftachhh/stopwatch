@@ -252,6 +252,68 @@ final class FloatingTextView: NSView {
     }
 }
 
+// Minutes and seconds fields with steppers and a Set button, shown inside the Timer > Custom submenu.
+final class CustomTimerView: NSView {
+    private let minutes = NSTextField()
+    private let seconds = NSTextField()
+    private let minutesStepper = NSStepper()
+    private let secondsStepper = NSStepper()
+    var onSet: ((Int) -> Void)?
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 250, height: 76))
+        var x: CGFloat = 16
+        for (field, stepper, label, maximum) in [(minutes, minutesStepper, "min", 60), (seconds, secondsStepper, "sec", 59)] {
+            let formatter = NumberFormatter()
+            formatter.minimum = 0
+            formatter.maximum = NSNumber(value: maximum)
+            formatter.allowsFloats = false
+            field.formatter = formatter
+            field.alignment = .right
+            field.frame = NSRect(x: x, y: 40, width: 44, height: 22)
+            stepper.minValue = 0
+            stepper.maxValue = Double(maximum)
+            stepper.valueWraps = false
+            stepper.frame = NSRect(x: x + 46, y: 39, width: 19, height: 24)
+            // keep field and stepper in sync both ways
+            stepper.target = field
+            stepper.action = #selector(NSTextField.takeIntegerValueFrom(_:))
+            field.target = stepper
+            field.action = #selector(NSStepper.takeIntegerValueFrom(_:))
+            let unit = NSTextField(labelWithString: label)
+            unit.frame = NSRect(x: x + 68, y: 43, width: 30, height: 16)
+            unit.textColor = .secondaryLabelColor
+            for view in [field, stepper, unit] { addSubview(view) }
+            x += 112
+        }
+        let set = NSButton(title: "Set", target: self, action: #selector(setPressed))
+        set.keyEquivalent = "\r"
+        set.frame = NSRect(x: 250 - 16 - 70, y: 8, width: 70, height: 26)
+        addSubview(set)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(_ totalSeconds: Int) {
+        let total = totalSeconds > 0 ? totalSeconds : 60
+        minutes.integerValue = total / 60
+        seconds.integerValue = total % 60
+        minutesStepper.integerValue = minutes.integerValue
+        secondsStepper.integerValue = seconds.integerValue
+    }
+
+    @objc private func setPressed() {
+        window?.makeFirstResponder(nil) // commit a value still being typed
+        let total = min(minutes.integerValue * 60 + seconds.integerValue, 3600)
+        guard total > 0 else { return }
+        onSet?(total)
+        // a button inside a menu doesn't close it; close the whole menu from the top
+        var top = enclosingMenuItem?.menu
+        while let parent = top?.supermenu { top = parent }
+        top?.cancelTracking()
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var timer: Timer?
@@ -266,9 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // a submenu can only belong to one menu, so each place gets its own copy
     private var timerMenus: [NSMenu] = []
     private var customTimerItems: [NSMenuItem] = []
-    private var customTimerLabel: NSTextField?
-    // slider stops for a custom timer: every 5 seconds up to 5 minutes, then every minute up to an hour
-    private static let customTimerValues = Array(stride(from: 5, to: 300, by: 5)) + Array(stride(from: 300, through: 3600, by: 60))
+    private var customTimerViews: [CustomTimerView] = []
     private let floatingItem = NSMenuItem()
     private var alertSoundItems: [NSMenuItem] = []
     private var alertSoundMenus: [NSMenu] = []
@@ -518,8 +578,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             timerMenu.addItem(item)
             if seconds == 0 {
                 // None, then Custom, then the presets
-                let custom = NSMenuItem(title: "Custom…", action: #selector(customTimer), keyEquivalent: "")
-                custom.target = self
+                let custom = NSMenuItem(title: "Custom…", action: nil, keyEquivalent: "")
+                let editor = CustomTimerView()
+                editor.onSet = { [weak self] seconds in self?.setTimer(seconds) }
+                let editorItem = NSMenuItem()
+                editorItem.view = editor
+                custom.submenu = NSMenu()
+                custom.submenu?.addItem(editorItem)
+                customTimerViews.append(editor)
                 timerMenu.addItem(custom)
                 timerMenu.addItem(.separator())
                 customTimerItems.append(custom)
@@ -790,44 +856,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.state = isPreset ? .off : .on
             item.title = isPreset ? "Custom…" : "Custom: \(Self.blinkLabel(blinkAfter))"
         }
-    }
-
-    @objc private func customTimer() {
-        let values = Self.customTimerValues
-        let start = blinkAfter > 0 ? blinkAfter : 60
-        let current = values.indices.min { abs(values[$0] - start) < abs(values[$1] - start) }!
-        let slider = NSSlider(value: Double(current), minValue: 0, maxValue: Double(values.count - 1),
-                              target: self, action: #selector(customTimerSliderChanged))
-        slider.frame = NSRect(x: 0, y: 28, width: 300, height: 24)
-        slider.isContinuous = true
-        let label = NSTextField(labelWithString: Self.blinkLabel(values[current]))
-        label.frame = NSRect(x: 0, y: 0, width: 300, height: 20)
-        label.alignment = .center
-        customTimerLabel = label
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 52))
-        container.addSubview(slider)
-        container.addSubview(label)
-
-        let alert = NSAlert()
-        alert.messageText = "Set a custom timer"
-        // the alert always reserves icon space; a timer symbol reads better there than the app icon
-        if let symbol = NSImage(systemSymbolName: "timer", accessibilityDescription: "Timer")?
-            .withSymbolConfiguration(.init(pointSize: 48, weight: .regular)) {
-            alert.icon = symbol
-        }
-        alert.informativeText = "When time's up, stopwatch will turn red"
-        alert.accessoryView = container
-        alert.addButton(withTitle: "Set")
-        alert.addButton(withTitle: "Cancel")
-        NSApp.activate(ignoringOtherApps: true) // menu bar app: bring the dialog to the front
-        if alert.runModal() == .alertFirstButtonReturn {
-            setTimer(values[Int(slider.doubleValue.rounded())])
-        }
-        customTimerLabel = nil
-    }
-
-    @objc private func customTimerSliderChanged(_ sender: NSSlider) {
-        customTimerLabel?.stringValue = Self.blinkLabel(Self.customTimerValues[Int(sender.doubleValue.rounded())])
+        for view in customTimerViews { view.show(blinkAfter) }
     }
 
     @objc private func selectAlertSound(_ sender: NSMenuItem) {
