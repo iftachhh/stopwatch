@@ -252,8 +252,8 @@ final class FloatingTextView: NSView {
     }
 }
 
-// Minutes and seconds fields with steppers and a Set button, shown inside the Timer > Custom submenu.
-final class CustomTimerView: NSView {
+// Minutes and seconds fields, each with its stepper, shown in the Timer menu. Changes apply right away.
+final class CustomTimerView: NSView, NSTextFieldDelegate {
     private let minutes = NSTextField()
     private let seconds = NSTextField()
     private let minutesStepper = NSStepper()
@@ -261,40 +261,39 @@ final class CustomTimerView: NSView {
     var onSet: ((Int) -> Void)?
 
     init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: 250, height: 76))
-        var x: CGFloat = 16
+        super.init(frame: NSRect(x: 0, y: 0, width: 230, height: 30))
+        var x: CGFloat = 30 // lines up with the menu item titles
         for (field, stepper, label, maximum) in [(minutes, minutesStepper, "min", 60), (seconds, secondsStepper, "sec", 59)] {
             let formatter = NumberFormatter()
             formatter.minimum = 0
             formatter.maximum = NSNumber(value: maximum)
             formatter.allowsFloats = false
             field.formatter = formatter
+            field.delegate = self
             field.alignment = .right
-            field.frame = NSRect(x: x, y: 40, width: 44, height: 22)
+            field.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            field.bezelStyle = .roundedBezel
+            field.frame = NSRect(x: x, y: 4, width: 36, height: 22)
+            // the stepper sits flush against its field, vertically centered on it
             stepper.minValue = 0
             stepper.maxValue = Double(maximum)
             stepper.valueWraps = false
-            stepper.frame = NSRect(x: x + 46, y: 39, width: 19, height: 24)
-            // keep field and stepper in sync both ways
-            stepper.target = field
-            stepper.action = #selector(NSTextField.takeIntegerValueFrom(_:))
-            field.target = stepper
-            field.action = #selector(NSStepper.takeIntegerValueFrom(_:))
+            stepper.target = self
+            stepper.action = #selector(stepped)
+            stepper.frame = NSRect(x: x + 37, y: 3, width: 15, height: 24)
             let unit = NSTextField(labelWithString: label)
-            unit.frame = NSRect(x: x + 68, y: 43, width: 30, height: 16)
             unit.textColor = .secondaryLabelColor
+            unit.frame = NSRect(x: x + 55, y: 7, width: 28, height: 16)
             for view in [field, stepper, unit] { addSubview(view) }
-            x += 112
+            x += 96
         }
-        let set = NSButton(title: "Set", target: self, action: #selector(setPressed))
-        set.keyEquivalent = "\r"
-        set.frame = NSRect(x: 250 - 16 - 70, y: 8, width: 70, height: 26)
-        addSubview(set)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     func show(_ totalSeconds: Int) {
+        // leave a field alone while it's being typed in
+        guard minutes.currentEditor() == nil, seconds.currentEditor() == nil else { return }
         let total = totalSeconds > 0 ? totalSeconds : 60
         minutes.integerValue = total / 60
         seconds.integerValue = total % 60
@@ -302,15 +301,22 @@ final class CustomTimerView: NSView {
         secondsStepper.integerValue = seconds.integerValue
     }
 
-    @objc private func setPressed() {
-        window?.makeFirstResponder(nil) // commit a value still being typed
-        let total = min(minutes.integerValue * 60 + seconds.integerValue, 3600)
-        guard total > 0 else { return }
-        onSet?(total)
-        // a button inside a menu doesn't close it; close the whole menu from the top
-        var top = enclosingMenuItem?.menu
-        while let parent = top?.supermenu { top = parent }
-        top?.cancelTracking()
+    @objc private func stepped(_ sender: NSStepper) {
+        (sender === minutesStepper ? minutes : seconds).integerValue = sender.integerValue
+        apply(minutes: minutesStepper.integerValue, seconds: secondsStepper.integerValue)
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        let m = min(Int(minutes.stringValue) ?? 0, 60)
+        let s = min(Int(seconds.stringValue) ?? 0, 59)
+        minutesStepper.integerValue = m
+        secondsStepper.integerValue = s
+        apply(minutes: m, seconds: s)
+    }
+
+    private func apply(minutes m: Int, seconds s: Int) {
+        let total = min(m * 60 + s, 3600)
+        if total > 0 { onSet?(total) } // 0:00 keeps the current timer
     }
 }
 
