@@ -298,9 +298,8 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
     func show(_ totalSeconds: Int) {
         // leave a field alone while it's being typed in
         guard minutes.currentEditor() == nil, seconds.currentEditor() == nil else { return }
-        let total = totalSeconds > 0 ? totalSeconds : 60
-        minutes.integerValue = total / 60
-        seconds.integerValue = total % 60
+        minutes.integerValue = totalSeconds / 60 // no timer shows 0:0
+        seconds.integerValue = totalSeconds % 60
         minutesStepper.integerValue = minutes.integerValue
         secondsStepper.integerValue = seconds.integerValue
     }
@@ -326,8 +325,7 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
     }
 
     private func apply(minutes m: Int, seconds s: Int) {
-        let total = min(m * 60 + s, 3600)
-        if total > 0 { onSet?(total) } // 0:00 keeps the current timer
+        onSet?(min(m * 60 + s, 3600)) // 0:0 means no timer (None)
     }
 }
 
@@ -344,7 +342,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Timer and Play Sound appear in both the menu bar menu and the floating stopwatch's menu;
     // a submenu can only belong to one menu, so each place gets its own copy
     private var timerMenus: [NSMenu] = []
-    private var customTimerItems: [NSMenuItem] = []
     private var customTimerViews: [CustomTimerView] = []
     private let floatingItem = NSMenuItem()
     private var alertSoundItems: [NSMenuItem] = []
@@ -596,16 +593,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if seconds == 0 {
                 // None, then Custom, then the presets
                 // the editor sits right in the Timer menu (a further submenu could open over the main menu)
-                let custom = NSMenuItem(title: "Custom", action: nil, keyEquivalent: "")
                 let editor = CustomTimerView()
                 editor.onSet = { [weak self] seconds in self?.setTimer(seconds) }
                 let editorItem = NSMenuItem()
                 editorItem.view = editor
                 customTimerViews.append(editor)
-                timerMenu.addItem(custom)
                 timerMenu.addItem(editorItem)
                 timerMenu.addItem(.separator())
-                customTimerItems.append(custom)
             }
         }
         timerMenus.append(timerMenu)
@@ -865,13 +859,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateTimerCheckmarks() {
-        let isPreset = Self.blinkOptions.contains(blinkAfter)
         for item in timerMenus.flatMap(\.items) where item.action == #selector(selectBlinkAfter) {
             item.state = item.tag == blinkAfter ? .on : .off
-        }
-        for item in customTimerItems {
-            item.state = isPreset ? .off : .on
-            item.title = isPreset ? "Custom" : "Custom: \(Self.blinkLabel(blinkAfter))"
         }
         for view in customTimerViews { view.show(blinkAfter) }
     }
