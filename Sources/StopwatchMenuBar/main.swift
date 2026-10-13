@@ -285,7 +285,7 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
             unit.textColor = .secondaryLabelColor
             unit.frame = NSRect(x: x + 63, y: 7, width: 28, height: 16)
             for view in [field, stepper, unit] { addSubview(view) }
-            x += 104
+            x += 92
         }
         // seconds step by 5, one step past either end so it can roll over into the minutes
         secondsStepper.increment = 5
@@ -602,6 +602,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 timerMenu.addItem(.separator())
             }
         }
+        // keep the checkmark column even when nothing is checked, so the titles and the editor stay aligned
+        let blank = NSImage(size: NSSize(width: 12, height: 12))
+        for item in timerMenu.items where !item.isSeparatorItem && item.view == nil { item.offStateImage = blank }
         timerMenus.append(timerMenu)
         let timerItem = NSMenuItem(title: "Timer", action: nil, keyEquivalent: "")
         timerItem.attributedTitle = Self.titleWithHint("Timer", "When time's up, stopwatch will turn red")
