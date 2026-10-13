@@ -258,17 +258,22 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
     private let seconds = NSTextField()
     private let minutesStepper = NSStepper()
     private let secondsStepper = NSStepper()
-    var onSet: ((Int) -> Void)?
+    private var pendingApply: Timer?
+    var onChange: ((Int) -> Void)?
 
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 30))
         var x: CGFloat = 34 // lines up with the menu item titles and dividers
-        for (field, stepper, label, maximum) in [(minutes, minutesStepper, "min", 60), (seconds, secondsStepper, "sec", 59)] {
+        for (field, stepper, label, name, maximum) in [(minutes, minutesStepper, "min", "Minutes", 60),
+                                                      (seconds, secondsStepper, "sec", "Seconds", 59)] {
             let formatter = NumberFormatter()
             formatter.minimum = 0
             formatter.maximum = NSNumber(value: maximum)
             formatter.allowsFloats = false
+            formatter.minimumIntegerDigits = field === seconds ? 2 : 1 // 1:05, like the rest of the app
             field.formatter = formatter
+            field.setAccessibilityLabel(name)
+            stepper.setAccessibilityLabel(name)
             field.delegate = self
             field.alignment = .right
             field.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
@@ -296,8 +301,8 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     func show(_ totalSeconds: Int) {
-        // leave a field alone while it's being typed in
-        guard minutes.currentEditor() == nil, seconds.currentEditor() == nil else { return }
+        // leave a field alone while it's being typed in (only possible while its menu is open)
+        if window?.isVisible == true, minutes.currentEditor() != nil || seconds.currentEditor() != nil { return }
         minutes.integerValue = totalSeconds / 60 // no timer shows 0:0
         seconds.integerValue = totalSeconds % 60
         minutesStepper.integerValue = minutes.integerValue
@@ -328,15 +333,42 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
     }
 
     func controlTextDidChange(_ notification: Notification) {
-        let m = min(Int(minutes.stringValue) ?? 0, 60)
-        let s = min(Int(seconds.stringValue) ?? 0, 59)
+        normalizeFields()
+        if minutes.stringValue == "60", seconds.stringValue != "00" { seconds.stringValue = "00" } // an hour at most
+        guard let m = Int(minutes.stringValue), let s = Int(seconds.stringValue) else { return }
         minutesStepper.integerValue = m
         secondsStepper.integerValue = s
-        apply(minutes: m, seconds: s)
+        // wait for a pause in typing, so "15" doesn't briefly set a 1-second timer
+        pendingApply?.invalidate()
+        let timer = Timer(timeInterval: 0.6, repeats: false) { [weak self] _ in self?.apply(minutes: m, seconds: s) }
+        RunLoop.main.add(timer, forMode: .common) // also runs while the menu is open
+        pendingApply = timer
+    }
+
+    // Esc or leaving a field can clear it; it should still read 0 / 00
+    func controlTextDidEndEditing(_ notification: Notification) {
+        normalizeFields()
+    }
+
+    // never empty, at most 2 digits within range. New digits push in from the right, so typing into "00" gives "05", then "53".
+    private func normalizeFields() {
+        for (field, maximum, zero) in [(minutes, 60, "0"), (seconds, 59, "00")] {
+            let digits = String(field.stringValue.filter(\.isNumber).suffix(2))
+            var text = digits.isEmpty ? zero : String(min(Int(digits)!, maximum))
+            if field === seconds && text.count < 2 { text = "0" + text }
+            if text != field.stringValue { field.stringValue = text }
+        }
+    }
+
+    // closing the menu: apply what was typed right away and stop editing, so the fields can show later changes
+    func finishEditing() {
+        if let timer = pendingApply, timer.isValid { timer.fire() }
+        window?.makeFirstResponder(nil)
     }
 
     private func apply(minutes m: Int, seconds s: Int) {
-        onSet?(min(m * 60 + s, 3600)) // 0:0 means no timer (None)
+        pendingApply = nil
+        onChange?(min(m * 60 + s, 3600)) // 0:0 means no timer (None)
     }
 }
 
@@ -599,7 +631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // minutes/seconds editor first, then None, then the presets.
         // The editor sits right in the Timer menu (a further submenu could open over the main menu).
         let editor = CustomTimerView()
-        editor.onSet = { [weak self] seconds in self?.setTimer(seconds) }
+        editor.onChange = { [weak self] seconds in self?.setTimer(seconds) }
         let editorItem = NSMenuItem()
         editorItem.view = editor
         customTimerViews.append(editor)
@@ -620,6 +652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.offStateImage = blank
             }
         }
+        timerMenu.delegate = self // finishes typing in the editor when the menu closes
         timerMenus.append(timerMenu)
         let timerItem = NSMenuItem(title: "Timer", action: nil, keyEquivalent: "")
         timerItem.attributedTitle = Self.titleWithHint("Timer", "When time's up, stopwatch will turn red")
@@ -651,6 +684,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) {
+        if let index = timerMenus.firstIndex(where: { $0 === menu }) {
+            customTimerViews[index].finishEditing()
+            return
+        }
         if alertSoundMenus.contains(where: { $0 === menu }) {
             previewSound?.stop()
             return
@@ -871,6 +908,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setTimer(_ seconds: Int) {
         blinkAfter = seconds
+        // changing the timer never sounds the alert; only time passing the alert time does
+        alertDone = blinkAfter > 0 && stopwatch.elapsed >= Double(blinkAfter)
         updateTimerCheckmarks()
         updateCustomizeCheckmarks()
         updateText()
