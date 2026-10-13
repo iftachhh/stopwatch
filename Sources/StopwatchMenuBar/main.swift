@@ -262,7 +262,7 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
 
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 30))
-        var x: CGFloat = 30 // lines up with the menu item titles
+        var x: CGFloat = 34 // lines up with the menu item titles and dividers
         for (field, stepper, label, maximum) in [(minutes, minutesStepper, "min", 60), (seconds, secondsStepper, "sec", 59)] {
             let formatter = NumberFormatter()
             formatter.minimum = 0
