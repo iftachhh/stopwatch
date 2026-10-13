@@ -261,7 +261,7 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
     var onSet: ((Int) -> Void)?
 
     init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: 230, height: 30))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 30))
         var x: CGFloat = 30 // lines up with the menu item titles
         for (field, stepper, label, maximum) in [(minutes, minutesStepper, "min", 60), (seconds, secondsStepper, "sec", 59)] {
             let formatter = NumberFormatter()
@@ -273,20 +273,24 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
             field.alignment = .right
             field.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             field.bezelStyle = .roundedBezel
-            field.frame = NSRect(x: x, y: 4, width: 36, height: 22)
+            field.frame = NSRect(x: x, y: 4, width: 44, height: 22)
             // the stepper sits flush against its field, vertically centered on it
             stepper.minValue = 0
             stepper.maxValue = Double(maximum)
             stepper.valueWraps = false
             stepper.target = self
             stepper.action = #selector(stepped)
-            stepper.frame = NSRect(x: x + 37, y: 3, width: 15, height: 24)
+            stepper.frame = NSRect(x: x + 45, y: 3, width: 15, height: 24)
             let unit = NSTextField(labelWithString: label)
             unit.textColor = .secondaryLabelColor
-            unit.frame = NSRect(x: x + 55, y: 7, width: 28, height: 16)
+            unit.frame = NSRect(x: x + 63, y: 7, width: 28, height: 16)
             for view in [field, stepper, unit] { addSubview(view) }
-            x += 96
+            x += 104
         }
+        // seconds step by 5, one step past either end so it can roll over into the minutes
+        secondsStepper.increment = 5
+        secondsStepper.minValue = -5
+        secondsStepper.maxValue = 60
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -302,8 +306,15 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
     }
 
     @objc private func stepped(_ sender: NSStepper) {
-        (sender === minutesStepper ? minutes : seconds).integerValue = sender.integerValue
-        apply(minutes: minutesStepper.integerValue, seconds: secondsStepper.integerValue)
+        var m = minutesStepper.integerValue, s = secondsStepper.integerValue
+        if s >= 60 { m += 1; s = 0 }                          // 55 → 60 rolls into the next minute
+        if s < 0 { (m, s) = m > 0 ? (m - 1, 55) : (0, 0) }     // 0 → -5 borrows a minute
+        if m >= 60 { (m, s) = (60, 0) }                         // an hour at most
+        minutes.integerValue = m
+        seconds.integerValue = s
+        minutesStepper.integerValue = m
+        secondsStepper.integerValue = s
+        apply(minutes: m, seconds: s)
     }
 
     func controlTextDidChange(_ notification: Notification) {
