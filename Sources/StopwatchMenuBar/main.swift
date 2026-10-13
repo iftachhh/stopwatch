@@ -585,22 +585,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func addTimerAndSoundItems(to menu: NSMenu) {
         menu.addItem(.separator()) // between Reset and Timer
         let timerMenu = NSMenu()
+        // minutes/seconds editor first, then None, then the presets.
+        // The editor sits right in the Timer menu (a further submenu could open over the main menu).
+        let editor = CustomTimerView()
+        editor.onSet = { [weak self] seconds in self?.setTimer(seconds) }
+        let editorItem = NSMenuItem()
+        editorItem.view = editor
+        customTimerViews.append(editor)
+        timerMenu.addItem(editorItem)
         for seconds in Self.blinkOptions {
             let item = NSMenuItem(title: Self.blinkLabel(seconds), action: #selector(selectBlinkAfter), keyEquivalent: "")
             item.tag = seconds
             item.target = self
             timerMenu.addItem(item)
-            if seconds == 0 {
-                // None, then Custom, then the presets
-                // the editor sits right in the Timer menu (a further submenu could open over the main menu)
-                let editor = CustomTimerView()
-                editor.onSet = { [weak self] seconds in self?.setTimer(seconds) }
-                let editorItem = NSMenuItem()
-                editorItem.view = editor
-                customTimerViews.append(editor)
-                timerMenu.addItem(editorItem)
-                timerMenu.addItem(.separator())
-            }
+            if seconds == 0 { timerMenu.addItem(.separator()) }
         }
         // keep the checkmark column even when nothing is checked, so the titles and the editor stay aligned:
         // the system checkmark for on, and a blank image of exactly its size for off
