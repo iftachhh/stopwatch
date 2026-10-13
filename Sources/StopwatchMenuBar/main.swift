@@ -287,9 +287,8 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
             for view in [field, stepper, unit] { addSubview(view) }
             x += 92
         }
-        // seconds step by 5, one step past either end so it can roll over into the minutes
-        secondsStepper.increment = 5
-        secondsStepper.minValue = -5
+        // the seconds stepper only reports a direction (one past either end); stepped() decides the step size
+        secondsStepper.minValue = -1
         secondsStepper.maxValue = 60
     }
 
@@ -305,15 +304,25 @@ final class CustomTimerView: NSView, NSTextFieldDelegate {
     }
 
     @objc private func stepped(_ sender: NSStepper) {
-        var m = minutesStepper.integerValue, s = secondsStepper.integerValue
-        if s >= 60 { m += 1; s = 0 }                          // 55 → 60 rolls into the next minute
-        if s < 0 { (m, s) = m > 0 ? (m - 1, 55) : (0, 0) }     // 0 → -5 borrows a minute
-        if m >= 60 { (m, s) = (60, 0) }                         // an hour at most
+        var total = minutes.integerValue * 60 + seconds.integerValue
+        if sender === minutesStepper {
+            total = minutesStepper.integerValue * 60 + seconds.integerValue
+        } else {
+            total = Self.stepSeconds(total, up: secondsStepper.integerValue > seconds.integerValue)
+        }
+        total = min(max(total, 0), 3600) // an hour at most
+        let m = total / 60, s = total % 60
         minutes.integerValue = m
         seconds.integerValue = s
         minutesStepper.integerValue = m
         secondsStepper.integerValue = s
         apply(minutes: m, seconds: s)
+    }
+
+    // 5-second steps up to a minute, 15-second steps above; snaps to the step grid, so 62 → 75 up or 60 down
+    static func stepSeconds(_ total: Int, up: Bool) -> Int {
+        let step = (up ? total < 60 : total <= 60) ? 5 : 15
+        return up ? (total / step + 1) * step : max(total - 1, 0) / step * step
     }
 
     func controlTextDidChange(_ notification: Notification) {
