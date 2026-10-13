@@ -698,7 +698,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateCustomizeCheckmarks() {
         // green to red counts toward the flash time; without one, fall back to gray
         if blinkAfter == 0 { floatingColor = 0 }
-        for item in alertSoundItems { item.isEnabled = blinkAfter > 0 }
+        for item in alertSoundItems { item.isHidden = blinkAfter == 0 } // sound only matters with a timer
         for item in alertSoundMenus.flatMap(\.items) { item.state = item.representedObject as? String == alertSound ? .on : .off }
         for item in customizeMenu.items where !item.isSeparatorItem {
             let selected: Bool
