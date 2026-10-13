@@ -252,70 +252,75 @@ final class FloatingTextView: NSView {
     }
 }
 
-// One menu row: "Custom", then mm:ss fields and a Set button. Shows a checkmark when a custom time is active.
-final class CustomTimerView: NSView {
-    private let check = NSTextField(labelWithString: "✓")
+// One menu row of mm:ss fields showing the timer (preset or custom); typing changes the timer right away.
+final class CustomTimerView: NSView, NSTextFieldDelegate {
     private let minutes = NSTextField()
     private let seconds = NSTextField()
-    var onSet: ((Int) -> Void)?
+    private let minutesStepper = NSStepper()
+    private let secondsStepper = NSStepper()
+    var onChange: ((Int) -> Void)?
 
     init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: 230, height: 26))
-        let menuFont = NSFont.menuFont(ofSize: 0)
-        check.font = menuFont
-        check.frame = NSRect(x: 10, y: 4, width: 16, height: 18)
-        let label = NSTextField(labelWithString: "Custom")
-        label.font = menuFont
-        label.frame = NSRect(x: 26, y: 4, width: 60, height: 18)
-
-        let set = NSButton(title: "Set", target: self, action: #selector(setPressed))
-        set.controlSize = .small
-        set.bezelStyle = .push
-        set.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        set.frame = NSRect(x: 230 - 14 - 40, y: 3, width: 40, height: 20)
-        var x = set.frame.minX - 6
-        for (field, maximum) in [(seconds, 59), (minutes, 60)] {
+        super.init(frame: NSRect(x: 0, y: 0, width: 150, height: 26))
+        var x: CGFloat = 26 // lines up with the menu item titles
+        for (field, stepper, maximum) in [(minutes, minutesStepper, 60), (seconds, secondsStepper, 59)] {
             let formatter = NumberFormatter()
             formatter.minimum = 0
             formatter.maximum = NSNumber(value: maximum)
             formatter.allowsFloats = false
             formatter.minimumIntegerDigits = 2
             field.formatter = formatter
+            field.delegate = self
             field.controlSize = .small
             field.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
             field.alignment = .center
             field.bezelStyle = .roundedBezel
-            x -= 28
             field.frame = NSRect(x: x, y: 4, width: 28, height: 19)
-            if field === seconds {
+            stepper.controlSize = .small
+            stepper.minValue = 0
+            stepper.maxValue = Double(maximum)
+            stepper.target = self
+            stepper.action = #selector(stepped)
+            stepper.frame = NSRect(x: x + 29, y: 3, width: 13, height: 21)
+            addSubview(field)
+            addSubview(stepper)
+            x += 28 + 14
+            if field === minutes {
                 let colon = NSTextField(labelWithString: ":")
-                colon.font = menuFont
-                colon.frame = NSRect(x: x - 7, y: 4, width: 6, height: 18)
+                colon.font = .menuFont(ofSize: 0)
+                colon.frame = NSRect(x: x + 1, y: 4, width: 6, height: 18)
                 addSubview(colon)
-                x -= 8
+                x += 8
             }
         }
-        for view in [check, label, minutes, seconds, set] { addSubview(view) }
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(_ totalSeconds: Int, active: Bool) {
-        let total = totalSeconds > 0 ? totalSeconds : 60
-        minutes.integerValue = total / 60
-        seconds.integerValue = total % 60
-        check.isHidden = !active
+    // 0 (no timer) shows 00:00; a field being typed in is left alone
+    func show(_ totalSeconds: Int) {
+        guard minutes.currentEditor() == nil, seconds.currentEditor() == nil else { return }
+        minutes.integerValue = totalSeconds / 60
+        seconds.integerValue = totalSeconds % 60
+        minutesStepper.integerValue = minutes.integerValue
+        secondsStepper.integerValue = seconds.integerValue
     }
 
-    @objc private func setPressed() {
-        window?.makeFirstResponder(nil) // commit a value still being typed
-        let total = min(minutes.integerValue * 60 + seconds.integerValue, 3600)
-        guard total > 0 else { return }
-        onSet?(total)
-        // a button inside a menu doesn't close it; close the whole menu from the top
-        var top = enclosingMenuItem?.menu
-        while let parent = top?.supermenu { top = parent }
-        top?.cancelTracking()
+    @objc private func stepped(_ sender: NSStepper) {
+        (sender === minutesStepper ? minutes : seconds).integerValue = sender.integerValue
+        changed(minutes: minutesStepper.integerValue, seconds: secondsStepper.integerValue)
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        let m = min(Int(minutes.stringValue) ?? 0, 60)
+        let s = min(Int(seconds.stringValue) ?? 0, 59)
+        minutesStepper.integerValue = m
+        secondsStepper.integerValue = s
+        changed(minutes: m, seconds: s)
+    }
+
+    private func changed(minutes m: Int, seconds s: Int) {
+        onChange?(min(m * 60 + s, 3600)) // 00:00 means no timer
     }
 }
 
@@ -584,7 +589,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // None, then Custom, then the presets
                 // the editor sits right in the Timer menu (a further submenu could open over the main menu)
                 let editor = CustomTimerView()
-                editor.onSet = { [weak self] seconds in self?.setTimer(seconds) }
+                editor.onChange = { [weak self] seconds in self?.setTimer(seconds) }
                 let editorItem = NSMenuItem()
                 editorItem.view = editor
                 customTimerViews.append(editor)
@@ -853,7 +858,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for item in timerMenus.flatMap(\.items) where item.action == #selector(selectBlinkAfter) {
             item.state = item.tag == blinkAfter ? .on : .off
         }
-        for view in customTimerViews { view.show(blinkAfter, active: !isPreset) }
+        for view in customTimerViews { view.show(blinkAfter) }
     }
 
     @objc private func selectAlertSound(_ sender: NSMenuItem) {
