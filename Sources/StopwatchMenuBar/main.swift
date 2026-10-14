@@ -254,15 +254,14 @@ final class FloatingTextView: NSView {
 
 // The custom time in the Timer menu: one "0:00" field and its stepper.
 // Click the field to select it (gray highlight, no caret). Digits fill in from the right like a microwave keypad
-// (0:05 → 0:53 → 5:30), Delete removes the last digit, ↑/↓ step like the stepper, Esc lets go.
+// (0:05 → 0:53 → 5:30) and apply as you type, Delete removes the last digit, ↑/↓ step like the stepper, Esc lets go.
 // Nothing is selected when the menu opens, so the arrow keys move through the menu until the field is clicked.
 final class CustomTimerView: NSView {
     private let field = NSTextField()
     private let stepper = NSStepper()
     private var total = 0          // seconds the field shows (0 = no timer)
-    private var typed: Int?        // digits typed so far, as mmss, until they're applied
+    private var typed: Int?        // digits typed since the field was selected, as mmss
     private var selected = false
-    private var pendingApply: Timer?
     var onChange: ((Int) -> Void)?
 
     init() {
@@ -293,9 +292,8 @@ final class CustomTimerView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
-    // the menu builds a new window each time it opens; start unselected, and apply typing when it closes
+    // the menu builds a new window each time it opens; start unselected
     override func viewDidMoveToWindow() {
-        if window == nil { applyTyping() }
         select(false)
     }
 
@@ -310,53 +308,50 @@ final class CustomTimerView: NSView {
         window?.makeFirstResponder(self)
     }
 
+    // The menu looks at arrow keys before they reach keyDown and would also move its highlight;
+    // claiming them here, at the key-equivalent stage, keeps them for the field while it's selected.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard selected, handle(event) else { return super.performKeyEquivalent(with: event) }
+        return true
+    }
+
     override func keyDown(with event: NSEvent) {
-        guard selected else { return super.keyDown(with: event) }
+        if !(selected && handle(event)) { super.keyDown(with: event) }
+    }
+
+    // returns whether the key was used
+    private func handle(_ event: NSEvent) -> Bool {
         let key = event.charactersIgnoringModifiers ?? ""
         if let digit = Int(key), key.count == 1 {
-            typed = ((typed ?? 0) * 10 + digit) % 10000 // at most mm:ss
-            scheduleApply()
+            type(min(((typed ?? 0) * 10 + digit) % 10000, 6000)) // at most mm:ss, an hour at most
         } else if event.keyCode == 51 || event.keyCode == 117 { // Delete, Forward Delete: drop the last digit
-            typed = (typed ?? Self.digits(total)) / 10
-            scheduleApply()
+            type((typed ?? Self.digits(total)) / 10)
         } else if event.keyCode == 126 || event.keyCode == 125 { // ↑, ↓
             step(up: event.keyCode == 126)
         } else if event.keyCode == 53 { // Esc: let go, so the arrow keys move through the menu again
-            applyTyping()
             select(false)
             window?.makeFirstResponder(nil)
         } else {
-            super.keyDown(with: event)
+            return false
         }
-        redraw()
+        return true
     }
 
     private func select(_ on: Bool) {
-        if !on { applyTyping() }
+        if !on { typed = nil } // the time is already applied; show it tidied up (0:90 → 1:30)
         selected = on
         redraw()
     }
 
-    // apply typed digits after a short pause, so typing "15" doesn't briefly set a 1-second timer
-    private func scheduleApply() {
-        pendingApply?.invalidate()
-        let timer = Timer(timeInterval: 0.8, repeats: false) { [weak self] _ in self?.applyTyping() }
-        RunLoop.main.add(timer, forMode: .common) // also runs while the menu is open
-        pendingApply = timer
-    }
-
-    private func applyTyping() {
-        pendingApply?.invalidate()
-        pendingApply = nil
-        guard let digits = typed else { return }
-        typed = nil
-        set(Self.seconds(fromDigits: digits)) // 0:90 becomes 1:30
+    // keeps building one number while selected (so 5, 9, 5, 9 gives 59:59) and applies it right away
+    private func type(_ digits: Int) {
+        typed = digits
+        set(Self.seconds(fromDigits: digits))
     }
 
     // MARK: values
 
     func show(_ totalSeconds: Int) {
-        guard typed == nil else { return } // don't overwrite digits still being typed
         total = totalSeconds
         redraw()
     }
@@ -368,7 +363,7 @@ final class CustomTimerView: NSView {
     }
 
     private func step(up: Bool) {
-        applyTyping()
+        typed = nil // stepping starts a fresh entry
         set(Self.step(total, up: up))
     }
 
