@@ -261,6 +261,7 @@ final class CustomTimerView: NSView {
     private let minutesStepper = NSStepper()
     private let secondsStepper = NSStepper()
     private var focused: NSTextField?
+    private let focusRing = NSView()
     private var pendingApply: Timer?
     var onChange: ((Int) -> Void)?
 
@@ -296,6 +297,11 @@ final class CustomTimerView: NSView {
             for view in [field, stepper, unit] { addSubview(view) }
             x += 92
         }
+        focusRing.wantsLayer = true
+        focusRing.layer?.borderWidth = 3
+        focusRing.layer?.cornerRadius = 7
+        focusRing.isHidden = true
+        addSubview(focusRing) // last, so it sits above the fields
         // the seconds stepper only reports a direction (one past either end); stepped() decides the step size
         secondsStepper.minValue = -1
         secondsStepper.maxValue = 60
@@ -359,19 +365,12 @@ final class CustomTimerView: NSView {
         highlight()
     }
 
-    // the focused field's digits get the selection highlight, like a focused date picker segment
-    // (the rounded field style ignores background colors, so the text itself carries it)
+    // the focused field gets an accent-colored focus ring, drawn by a layer on top of everything else
     private func highlight() {
-        let alignRight = NSMutableParagraphStyle()
-        alignRight.alignment = .right
-        for field in [minutes, seconds] {
-            var attributes: [NSAttributedString.Key: Any] = [.font: field.font!, .paragraphStyle: alignRight]
-            if field === focused {
-                attributes[.backgroundColor] = NSColor.selectedContentBackgroundColor
-                attributes[.foregroundColor] = NSColor.alternateSelectedControlTextColor
-            }
-            field.attributedStringValue = NSAttributedString(string: field.stringValue, attributes: attributes)
-        }
+        guard let field = focused else { return focusRing.isHidden = true }
+        focusRing.isHidden = false
+        focusRing.frame = field.frame.insetBy(dx: -2, dy: -2)
+        focusRing.layer?.borderColor = NSColor.keyboardFocusIndicatorColor.cgColor
     }
 
     // apply typed digits after a short pause, so "15" doesn't briefly set a 1-minute timer
