@@ -340,9 +340,11 @@ final class CustomTimerView: NSView {
             let value = min((field.integerValue * 10 + digit) % 100, maximum)
             field.integerValue = value
             if minutes.integerValue == 60 { seconds.integerValue = 0 } // an hour at most
+            highlight()
             scheduleApply()
         } else if event.keyCode == 51 || event.keyCode == 117 { // Delete, Forward Delete
             field.integerValue = 0
+            highlight()
             scheduleApply()
         } else if event.keyCode == 48 || event.keyCode == 123 || event.keyCode == 124 { // Tab, ←, →
             focus(field === minutes ? seconds : minutes)
@@ -354,9 +356,21 @@ final class CustomTimerView: NSView {
     private func focus(_ field: NSTextField?) {
         flushTyping()
         focused = field
-        for f in [minutes, seconds] {
-            f.drawsBackground = f === field
-            f.backgroundColor = .selectedTextBackgroundColor
+        highlight()
+    }
+
+    // the focused field's digits get the selection highlight, like a focused date picker segment
+    // (the rounded field style ignores background colors, so the text itself carries it)
+    private func highlight() {
+        let alignRight = NSMutableParagraphStyle()
+        alignRight.alignment = .right
+        for field in [minutes, seconds] {
+            var attributes: [NSAttributedString.Key: Any] = [.font: field.font!, .paragraphStyle: alignRight]
+            if field === focused {
+                attributes[.backgroundColor] = NSColor.selectedContentBackgroundColor
+                attributes[.foregroundColor] = NSColor.alternateSelectedControlTextColor
+            }
+            field.attributedStringValue = NSAttributedString(string: field.stringValue, attributes: attributes)
         }
     }
 
@@ -385,6 +399,7 @@ final class CustomTimerView: NSView {
         seconds.integerValue = totalSeconds % 60
         minutesStepper.integerValue = minutes.integerValue
         secondsStepper.integerValue = seconds.integerValue
+        highlight()
     }
 
     @objc private func stepped(_ sender: NSStepper) {
@@ -403,6 +418,7 @@ final class CustomTimerView: NSView {
         seconds.integerValue = s
         minutesStepper.integerValue = m
         secondsStepper.integerValue = s
+        highlight()
         apply(minutes: m, seconds: s)
     }
 
