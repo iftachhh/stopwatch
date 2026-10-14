@@ -261,7 +261,6 @@ final class CustomTimerView: NSView {
     private let minutesStepper = NSStepper()
     private let secondsStepper = NSStepper()
     private var focused: NSTextField?
-    private let focusRing = NSView()
     private var pendingApply: Timer?
     var onChange: ((Int) -> Void)?
 
@@ -270,12 +269,6 @@ final class CustomTimerView: NSView {
         var x: CGFloat = 34 // lines up with the menu item titles and dividers
         for (field, stepper, label, name, maximum) in [(minutes, minutesStepper, "min", "Minutes", 60),
                                                       (seconds, secondsStepper, "sec", "Seconds", 59)] {
-            let formatter = NumberFormatter()
-            formatter.minimum = 0
-            formatter.maximum = NSNumber(value: maximum)
-            formatter.allowsFloats = false
-            formatter.minimumIntegerDigits = field === seconds ? 2 : 1 // 1:05, like the rest of the app
-            field.formatter = formatter
             field.setAccessibilityLabel(name)
             stepper.setAccessibilityLabel(name)
             field.isEditable = false   // keys go to this view instead, so there's never a caret
@@ -297,11 +290,6 @@ final class CustomTimerView: NSView {
             for view in [field, stepper, unit] { addSubview(view) }
             x += 92
         }
-        focusRing.wantsLayer = true
-        focusRing.layer?.borderWidth = 3
-        focusRing.layer?.cornerRadius = 7
-        focusRing.isHidden = true
-        addSubview(focusRing) // last, so it sits above the fields
         // the seconds stepper only reports a direction (one past either end); stepped() decides the step size
         secondsStepper.minValue = -1
         secondsStepper.maxValue = 60
@@ -365,12 +353,20 @@ final class CustomTimerView: NSView {
         highlight()
     }
 
-    // the focused field gets an accent-colored focus ring, drawn by a layer on top of everything else
+    // redraws both fields from their values: seconds as two digits (1:05, like the rest of the app), and the
+    // focused field's digits on a gray selection highlight. No number formatter: it would repaint the text
+    // and drop the highlight.
     private func highlight() {
-        guard let field = focused else { return focusRing.isHidden = true }
-        focusRing.isHidden = false
-        focusRing.frame = field.frame.insetBy(dx: -2, dy: -2)
-        focusRing.layer?.borderColor = NSColor.keyboardFocusIndicatorColor.cgColor
+        let alignRight = NSMutableParagraphStyle()
+        alignRight.alignment = .right
+        for field in [minutes, seconds] {
+            let text = field === seconds ? String(format: "%02d", field.integerValue) : String(field.integerValue)
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: field.font!, .paragraphStyle: alignRight, .foregroundColor: NSColor.labelColor
+            ]
+            if field === focused { attributes[.backgroundColor] = NSColor.unemphasizedSelectedTextBackgroundColor }
+            field.attributedStringValue = NSAttributedString(string: text, attributes: attributes)
+        }
     }
 
     // apply typed digits after a short pause, so "15" doesn't briefly set a 1-minute timer
