@@ -252,186 +252,154 @@ final class FloatingTextView: NSView {
     }
 }
 
-// Minutes and seconds fields, each with its stepper, shown in the Timer menu.
-// Works like a date picker's segments: one field is focused (highlighted as a whole, no caret), digits push in
-// from the right ("00" → "04" → "45"), ↑/↓ step the value, Delete clears to 0, Tab or ←/→ switch fields, Esc lets go.
-// Nothing is focused when the menu opens, so the arrow keys move through the menu until a field is clicked.
+// The custom time in the Timer menu: one "0:00" field and its stepper.
+// Click the field to select it (gray highlight, no caret). Digits fill in from the right like a microwave keypad
+// (0:05 → 0:53 → 5:30), Delete removes the last digit, ↑/↓ step like the stepper, Esc lets go.
+// Nothing is selected when the menu opens, so the arrow keys move through the menu until the field is clicked.
 final class CustomTimerView: NSView {
-    private let minutes = NSTextField()
-    private let seconds = NSTextField()
-    private let minutesStepper = NSStepper()
-    private let secondsStepper = NSStepper()
-    private var focused: NSTextField?
+    private let field = NSTextField()
+    private let stepper = NSStepper()
+    private var total = 0          // seconds the field shows (0 = no timer)
+    private var typed: Int?        // digits typed so far, as mmss, until they're applied
+    private var selected = false
     private var pendingApply: Timer?
     var onChange: ((Int) -> Void)?
 
     init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 30))
-        var x: CGFloat = 34 // lines up with the menu item titles and dividers
-        for (field, stepper, label, name, maximum) in [(minutes, minutesStepper, "min", "Minutes", 60),
-                                                      (seconds, secondsStepper, "sec", "Seconds", 59)] {
-            field.setAccessibilityLabel(name)
-            stepper.setAccessibilityLabel(name)
-            field.isEditable = false   // keys go to this view instead, so there's never a caret
-            field.isSelectable = false
-            field.alignment = .right
-            field.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-            field.bezelStyle = .roundedBezel
-            field.frame = NSRect(x: x, y: 4, width: 44, height: 22)
-            // the stepper sits flush against its field, vertically centered on it
-            stepper.minValue = 0
-            stepper.maxValue = Double(maximum)
-            stepper.valueWraps = false
-            stepper.target = self
-            stepper.action = #selector(stepped)
-            stepper.frame = NSRect(x: x + 45, y: 3, width: 15, height: 24)
-            let unit = NSTextField(labelWithString: label)
-            unit.textColor = .secondaryLabelColor
-            unit.frame = NSRect(x: x + 63, y: 7, width: 28, height: 16)
-            for view in [field, stepper, unit] { addSubview(view) }
-            x += 92
-        }
-        // the seconds stepper only reports a direction (one past either end); stepped() decides the step size
-        secondsStepper.minValue = -1
-        secondsStepper.maxValue = 60
-        minutesStepper.minValue = -1 // so "−" still registers under a minute (and clears it)
+        super.init(frame: NSRect(x: 0, y: 0, width: 140, height: 30))
+        let x: CGFloat = 34 // lines up with the menu item titles and dividers
+        field.isEditable = false   // keys come to this view instead, so there's never a caret
+        field.isSelectable = false
+        field.alignment = .right
+        field.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        field.bezelStyle = .roundedBezel
+        field.frame = NSRect(x: x, y: 4, width: 56, height: 22)
+        field.setAccessibilityLabel("Timer")
+        // the stepper only reports a direction (one past either side of 0); step() decides the amount
+        stepper.minValue = -1
+        stepper.maxValue = 1
+        stepper.target = self
+        stepper.action = #selector(stepped)
+        stepper.frame = NSRect(x: x + 57, y: 3, width: 15, height: 24)
+        stepper.setAccessibilityLabel("Timer")
+        addSubview(field)
+        addSubview(stepper)
+        redraw()
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    // MARK: focus and typing
+    // MARK: selection and typing
 
     override var acceptsFirstResponder: Bool { true }
 
-    // the menu builds a new window each time it opens; start unfocused, and flush typing when it closes
+    // the menu builds a new window each time it opens; start unselected, and apply typing when it closes
     override func viewDidMoveToWindow() {
-        if window == nil { flushTyping() }
-        focus(nil)
+        if window == nil { applyTyping() }
+        select(false)
     }
 
-    // clicks on the fields come to this view (read-only fields would otherwise swallow them)
+    // clicks on the field come to this view (a read-only field would otherwise swallow them)
     override func hitTest(_ point: NSPoint) -> NSView? {
         let view = super.hitTest(point)
-        return view === minutes || view === seconds ? self : view
+        return view === field ? self : view
     }
 
     override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        focus(minutes.frame.contains(point) ? minutes : seconds.frame.contains(point) ? seconds : focused)
+        select(true)
         window?.makeFirstResponder(self)
     }
 
     override func keyDown(with event: NSEvent) {
-        guard let field = focused else { return super.keyDown(with: event) }
+        guard selected else { return super.keyDown(with: event) }
         let key = event.charactersIgnoringModifiers ?? ""
         if let digit = Int(key), key.count == 1 {
-            // push the digit in from the right, keep the last two, cap at the field's maximum
-            let maximum = field === minutes ? 60 : 59
-            let value = min((field.integerValue * 10 + digit) % 100, maximum)
-            field.integerValue = value
-            if minutes.integerValue == 60 { seconds.integerValue = 0 } // an hour at most
-            highlight()
+            typed = ((typed ?? 0) * 10 + digit) % 10000 // at most mm:ss
             scheduleApply()
-        } else if event.keyCode == 51 || event.keyCode == 117 { // Delete, Forward Delete
-            field.integerValue = 0
-            highlight()
+        } else if event.keyCode == 51 || event.keyCode == 117 { // Delete, Forward Delete: drop the last digit
+            typed = (typed ?? Self.digits(total)) / 10
             scheduleApply()
-        } else if event.keyCode == 48 || event.keyCode == 123 || event.keyCode == 124 { // Tab, ←, →
-            focus(field === minutes ? seconds : minutes)
-        } else if event.keyCode == 126 || event.keyCode == 125 { // ↑, ↓ step the focused field
-            step(minutesField: field === minutes, up: event.keyCode == 126)
+        } else if event.keyCode == 126 || event.keyCode == 125 { // ↑, ↓
+            step(up: event.keyCode == 126)
         } else if event.keyCode == 53 { // Esc: let go, so the arrow keys move through the menu again
-            focus(nil)
+            applyTyping()
+            select(false)
             window?.makeFirstResponder(nil)
         } else {
-            super.keyDown(with: event) // Return and anything else stay with the menu
+            super.keyDown(with: event)
         }
+        redraw()
     }
 
-    private func focus(_ field: NSTextField?) {
-        flushTyping()
-        focused = field
-        highlight()
+    private func select(_ on: Bool) {
+        if !on { applyTyping() }
+        selected = on
+        redraw()
     }
 
-    // redraws both fields from their values: seconds as two digits (1:05, like the rest of the app), and the
-    // focused field's digits on a gray selection highlight. No number formatter: it would repaint the text
-    // and drop the highlight.
-    private func highlight() {
-        let alignRight = NSMutableParagraphStyle()
-        alignRight.alignment = .right
-        for field in [minutes, seconds] {
-            let text = field === seconds ? String(format: "%02d", field.integerValue) : String(field.integerValue)
-            var attributes: [NSAttributedString.Key: Any] = [
-                .font: field.font!, .paragraphStyle: alignRight, .foregroundColor: NSColor.labelColor
-            ]
-            if field === focused { attributes[.backgroundColor] = NSColor.unemphasizedSelectedTextBackgroundColor }
-            field.attributedStringValue = NSAttributedString(string: text, attributes: attributes)
-        }
-    }
-
-    // apply typed digits after a short pause, so "15" doesn't briefly set a 1-minute timer
+    // apply typed digits after a short pause, so typing "15" doesn't briefly set a 1-second timer
     private func scheduleApply() {
-        minutesStepper.integerValue = minutes.integerValue
-        secondsStepper.integerValue = seconds.integerValue
         pendingApply?.invalidate()
-        let timer = Timer(timeInterval: 0.6, repeats: false) { [weak self] _ in self?.flushTyping() }
+        let timer = Timer(timeInterval: 0.8, repeats: false) { [weak self] _ in self?.applyTyping() }
         RunLoop.main.add(timer, forMode: .common) // also runs while the menu is open
         pendingApply = timer
     }
 
-    private func flushTyping() {
-        guard pendingApply != nil else { return }
+    private func applyTyping() {
         pendingApply?.invalidate()
         pendingApply = nil
-        apply(minutes: minutes.integerValue, seconds: seconds.integerValue)
+        guard let digits = typed else { return }
+        typed = nil
+        set(Self.seconds(fromDigits: digits)) // 0:90 becomes 1:30
     }
 
     // MARK: values
 
     func show(_ totalSeconds: Int) {
-        guard pendingApply == nil else { return } // don't overwrite digits still being typed
-        minutes.integerValue = totalSeconds / 60 // no timer shows 0:0
-        seconds.integerValue = totalSeconds % 60
-        minutesStepper.integerValue = minutes.integerValue
-        secondsStepper.integerValue = seconds.integerValue
-        highlight()
+        guard typed == nil else { return } // don't overwrite digits still being typed
+        total = totalSeconds
+        redraw()
     }
 
     @objc private func stepped(_ sender: NSStepper) {
-        let isMinutes = sender === minutesStepper
-        step(minutesField: isMinutes, up: sender.integerValue > (isMinutes ? minutes : seconds).integerValue)
+        let up = sender.integerValue > 0
+        sender.integerValue = 0
+        step(up: up)
     }
 
-    // one step of a field, from its stepper or ↑/↓
-    private func step(minutesField: Bool, up: Bool) {
-        pendingApply?.invalidate()
-        pendingApply = nil
-        var total = minutes.integerValue * 60 + seconds.integerValue
-        if minutesField {
-            total = up ? total + 60 : total < 60 ? 0 : total - 60 // under a minute, "−" clears the seconds
-        } else {
-            total = Self.stepSeconds(total, up: up)
-        }
-        total = min(max(total, 0), 3600) // an hour at most
-        let m = total / 60, s = total % 60
-        minutes.integerValue = m
-        seconds.integerValue = s
-        minutesStepper.integerValue = m
-        secondsStepper.integerValue = s
-        highlight()
-        apply(minutes: m, seconds: s)
+    private func step(up: Bool) {
+        applyTyping()
+        set(Self.step(total, up: up))
+    }
+
+    private func set(_ seconds: Int) {
+        total = min(max(seconds, 0), 3600) // an hour at most
+        redraw()
+        onChange?(total) // 0:00 means no timer (None)
+    }
+
+    // shows typed digits as they are (0:9 → "0:09", even 0:90), otherwise the time; gray highlight when selected
+    private func redraw() {
+        let digits = typed ?? Self.digits(total)
+        let text = "\(digits / 100):" + String(format: "%02d", digits % 100)
+        let alignRight = NSMutableParagraphStyle()
+        alignRight.alignment = .right
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: field.font!, .paragraphStyle: alignRight, .foregroundColor: NSColor.labelColor
+        ]
+        if selected { attributes[.backgroundColor] = NSColor.unemphasizedSelectedTextBackgroundColor }
+        field.attributedStringValue = NSAttributedString(string: text, attributes: attributes)
     }
 
     // 5-second steps up to a minute, 15-second steps above; snaps to the step grid, so 62 → 75 up or 60 down
-    static func stepSeconds(_ total: Int, up: Bool) -> Int {
+    static func step(_ total: Int, up: Bool) -> Int {
         let step = (up ? total < 60 : total <= 60) ? 5 : 15
         return up ? (total / step + 1) * step : max(total - 1, 0) / step * step
     }
 
-    private func apply(minutes m: Int, seconds s: Int) {
-        onChange?(min(m * 60 + s, 3600)) // 0:0 means no timer (None)
-    }
+    // 1:30 ↔ 130 (mmss digits); typed seconds past 59 carry into minutes
+    static func digits(_ seconds: Int) -> Int { seconds / 60 * 100 + seconds % 60 }
+    static func seconds(fromDigits digits: Int) -> Int { digits / 100 * 60 + digits % 100 }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
