@@ -252,13 +252,16 @@ final class FloatingTextView: NSView {
     }
 }
 
-// Minutes and seconds readouts, each with its stepper, shown in the Timer menu. Changes apply right away.
-// The readouts can't be edited or selected; the steppers set the time.
+// Minutes and seconds fields, each with its stepper, shown in the Timer menu.
+// Works like a date picker's segments: one field is focused (highlighted as a whole, no caret), digits push in
+// from the right ("00" → "04" → "45"), Delete clears to 0, Tab or ←/→ switch fields. Minutes is focused on open.
 final class CustomTimerView: NSView {
     private let minutes = NSTextField()
     private let seconds = NSTextField()
     private let minutesStepper = NSStepper()
     private let secondsStepper = NSStepper()
+    private var focused: NSTextField?
+    private var pendingApply: Timer?
     var onChange: ((Int) -> Void)?
 
     init() {
@@ -274,7 +277,7 @@ final class CustomTimerView: NSView {
             field.formatter = formatter
             field.setAccessibilityLabel(name)
             stepper.setAccessibilityLabel(name)
-            field.isEditable = false
+            field.isEditable = false   // keys go to this view instead, so there's never a caret
             field.isSelectable = false
             field.alignment = .right
             field.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
@@ -301,7 +304,83 @@ final class CustomTimerView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    // MARK: focus and typing
+
+    override var acceptsFirstResponder: Bool { true }
+
+    // the menu builds a new window each time it opens: focus minutes then; flush typing when it closes
+    override func viewDidMoveToWindow() {
+        if window != nil {
+            focus(minutes)
+            window?.makeFirstResponder(self)
+        } else {
+            flushTyping()
+            focus(nil)
+        }
+    }
+
+    // clicks on the fields come to this view (read-only fields would otherwise swallow them)
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let view = super.hitTest(point)
+        return view === minutes || view === seconds ? self : view
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        focus(minutes.frame.contains(point) ? minutes : seconds.frame.contains(point) ? seconds : focused)
+        window?.makeFirstResponder(self)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard let field = focused else { return super.keyDown(with: event) }
+        let key = event.charactersIgnoringModifiers ?? ""
+        if let digit = Int(key), key.count == 1 {
+            // push the digit in from the right, keep the last two, cap at the field's maximum
+            let maximum = field === minutes ? 60 : 59
+            let value = min((field.integerValue * 10 + digit) % 100, maximum)
+            field.integerValue = value
+            if minutes.integerValue == 60 { seconds.integerValue = 0 } // an hour at most
+            scheduleApply()
+        } else if event.keyCode == 51 || event.keyCode == 117 { // Delete, Forward Delete
+            field.integerValue = 0
+            scheduleApply()
+        } else if event.keyCode == 48 || event.keyCode == 123 || event.keyCode == 124 { // Tab, ←, →
+            focus(field === minutes ? seconds : minutes)
+        } else {
+            super.keyDown(with: event) // Esc, Return, ↑/↓ stay with the menu
+        }
+    }
+
+    private func focus(_ field: NSTextField?) {
+        flushTyping()
+        focused = field
+        for f in [minutes, seconds] {
+            f.drawsBackground = f === field
+            f.backgroundColor = .selectedTextBackgroundColor
+        }
+    }
+
+    // apply typed digits after a short pause, so "15" doesn't briefly set a 1-minute timer
+    private func scheduleApply() {
+        minutesStepper.integerValue = minutes.integerValue
+        secondsStepper.integerValue = seconds.integerValue
+        pendingApply?.invalidate()
+        let timer = Timer(timeInterval: 0.6, repeats: false) { [weak self] _ in self?.flushTyping() }
+        RunLoop.main.add(timer, forMode: .common) // also runs while the menu is open
+        pendingApply = timer
+    }
+
+    private func flushTyping() {
+        guard pendingApply != nil else { return }
+        pendingApply?.invalidate()
+        pendingApply = nil
+        apply(minutes: minutes.integerValue, seconds: seconds.integerValue)
+    }
+
+    // MARK: values
+
     func show(_ totalSeconds: Int) {
+        guard pendingApply == nil else { return } // don't overwrite digits still being typed
         minutes.integerValue = totalSeconds / 60 // no timer shows 0:0
         seconds.integerValue = totalSeconds % 60
         minutesStepper.integerValue = minutes.integerValue
@@ -309,6 +388,8 @@ final class CustomTimerView: NSView {
     }
 
     @objc private func stepped(_ sender: NSStepper) {
+        pendingApply?.invalidate()
+        pendingApply = nil
         var total = minutes.integerValue * 60 + seconds.integerValue
         if sender === minutesStepper {
             // under a minute, minutes "−" clears the seconds
