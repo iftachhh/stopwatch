@@ -342,8 +342,14 @@ final class CustomTimerView: NSView {
             scheduleApply()
         } else if event.keyCode == 48 || event.keyCode == 123 || event.keyCode == 124 { // Tab, ←, →
             focus(field === minutes ? seconds : minutes)
+        } else if event.keyCode == 125 || event.keyCode == 126 || event.keyCode == 53 { // ↓, ↑, Esc
+            // hand the keyboard back to the Timer menu: stop being first responder and resend the key, so the
+            // menu itself moves its highlight (sent from here it went up to the parent menu instead)
+            focus(nil)
+            window?.makeFirstResponder(nil)
+            NSApp.postEvent(event, atStart: true)
         } else {
-            super.keyDown(with: event) // Esc, Return, ↑/↓ stay with the menu
+            super.keyDown(with: event) // Return and anything else stay with the menu
         }
     }
 
