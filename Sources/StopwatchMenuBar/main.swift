@@ -270,7 +270,7 @@ final class CustomTimerView: NSView {
         let x: CGFloat = 34 // lines up with the menu item titles and dividers
         field.isEditable = false   // keys come to this view instead, so there's never a caret
         field.isSelectable = false
-        field.alignment = .right
+        field.alignment = .left
         field.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         field.bezelStyle = .roundedBezel
         field.frame = NSRect(x: x, y: 4, width: 64, height: 22) // fits "60:00"
@@ -366,10 +366,10 @@ final class CustomTimerView: NSView {
     private func redraw() {
         let digits = typed ?? Self.digits(total)
         let text = "\(digits / 100):" + String(format: "%02d", digits % 100)
-        let alignRight = NSMutableParagraphStyle()
-        alignRight.alignment = .right
+        let alignLeft = NSMutableParagraphStyle()
+        alignLeft.alignment = .left
         var attributes: [NSAttributedString.Key: Any] = [
-            .font: field.font!, .paragraphStyle: alignRight, .foregroundColor: NSColor.labelColor
+            .font: field.font!, .paragraphStyle: alignLeft, .foregroundColor: NSColor.labelColor
         ]
         if selected { attributes[.backgroundColor] = NSColor.unemphasizedSelectedTextBackgroundColor }
         field.attributedStringValue = NSAttributedString(string: text, attributes: attributes)
