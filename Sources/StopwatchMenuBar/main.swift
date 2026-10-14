@@ -254,7 +254,8 @@ final class FloatingTextView: NSView {
 
 // Minutes and seconds fields, each with its stepper, shown in the Timer menu.
 // Works like a date picker's segments: one field is focused (highlighted as a whole, no caret), digits push in
-// from the right ("00" → "04" → "45"), Delete clears to 0, Tab or ←/→ switch fields. Minutes is focused on open.
+// from the right ("00" → "04" → "45"), ↑/↓ step the value, Delete clears to 0, Tab or ←/→ switch fields, Esc lets go.
+// Nothing is focused when the menu opens, so the arrow keys move through the menu until a field is clicked.
 final class CustomTimerView: NSView {
     private let minutes = NSTextField()
     private let seconds = NSTextField()
@@ -302,15 +303,10 @@ final class CustomTimerView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
-    // the menu builds a new window each time it opens: focus minutes then; flush typing when it closes
+    // the menu builds a new window each time it opens; start unfocused, and flush typing when it closes
     override func viewDidMoveToWindow() {
-        if window != nil {
-            focus(minutes)
-            window?.makeFirstResponder(self)
-        } else {
-            flushTyping()
-            focus(nil)
-        }
+        if window == nil { flushTyping() }
+        focus(nil)
     }
 
     // clicks on the fields come to this view (read-only fields would otherwise swallow them)
@@ -342,12 +338,11 @@ final class CustomTimerView: NSView {
             scheduleApply()
         } else if event.keyCode == 48 || event.keyCode == 123 || event.keyCode == 124 { // Tab, ←, →
             focus(field === minutes ? seconds : minutes)
-        } else if event.keyCode == 125 || event.keyCode == 126 || event.keyCode == 53 { // ↓, ↑, Esc
-            // hand the keyboard back to the Timer menu: stop being first responder and resend the key, so the
-            // menu itself moves its highlight (sent from here it went up to the parent menu instead)
+        } else if event.keyCode == 126 || event.keyCode == 125 { // ↑, ↓ step the focused field
+            step(minutesField: field === minutes, up: event.keyCode == 126)
+        } else if event.keyCode == 53 { // Esc: let go, so the arrow keys move through the menu again
             focus(nil)
             window?.makeFirstResponder(nil)
-            NSApp.postEvent(event, atStart: true)
         } else {
             super.keyDown(with: event) // Return and anything else stay with the menu
         }
@@ -404,14 +399,19 @@ final class CustomTimerView: NSView {
     }
 
     @objc private func stepped(_ sender: NSStepper) {
+        let isMinutes = sender === minutesStepper
+        step(minutesField: isMinutes, up: sender.integerValue > (isMinutes ? minutes : seconds).integerValue)
+    }
+
+    // one step of a field, from its stepper or ↑/↓
+    private func step(minutesField: Bool, up: Bool) {
         pendingApply?.invalidate()
         pendingApply = nil
         var total = minutes.integerValue * 60 + seconds.integerValue
-        if sender === minutesStepper {
-            // under a minute, minutes "−" clears the seconds
-            total = minutesStepper.integerValue < 0 ? 0 : minutesStepper.integerValue * 60 + seconds.integerValue
+        if minutesField {
+            total = up ? total + 60 : total < 60 ? 0 : total - 60 // under a minute, "−" clears the seconds
         } else {
-            total = Self.stepSeconds(total, up: secondsStepper.integerValue > seconds.integerValue)
+            total = Self.stepSeconds(total, up: up)
         }
         total = min(max(total, 0), 3600) // an hour at most
         let m = total / 60, s = total % 60
