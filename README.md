@@ -5,7 +5,7 @@
 A tiny macOS menu bar stopwatch, with an optional floating stopwatch on top of everything.
 
 - Click to start and stop, double-click to reset; ⌥+click to resume or start from zero.
-- Global shortcuts: ⌥\ acts like a click, ⌥⇧\ like a ⌥+click.
+- Global shortcuts: ⌥\ acts like a click, ⌥⇧\ like a ⌥+click; a quick double press resets.
 - Timer from 5 seconds to an hour: when time's up the stopwatch turns red and can play a sound.
 - Floating stopwatch that snaps to the screen edges. Right-click it to change its style, size, font and color.
 

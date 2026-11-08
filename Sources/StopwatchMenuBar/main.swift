@@ -516,17 +516,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // the saved tone is gone from this macOS: switch the setting to Ping
         if !Self.alertSounds.contains(where: { $0.1 == alertSound }) { alertSound = "Ping" }
         addTimerAndSoundItems(to: menu)
-        menu.addItem(.separator())
-        for (title, subtitle, tag) in [("Click to Start from Zero", "⌥+click to resume", 1),
-                                       ("Click to Start or Resume", "⌥+click to start from zero", 0)] {
-            let item = NSMenuItem(title: title, action: #selector(selectClickMode), keyEquivalent: "")
-            item.attributedTitle = Self.titleWithHint(title, subtitle)
-            item.tag = tag
-            item.state = (tag == 1) == reverseClickActions ? .on : .off
-            menu.addItem(item)
-            clickModeItems.append(item)
-        }
-        menu.addItem(.separator())
+        addClickModeItems(to: menu)
         floatingItem.attributedTitle = Self.titleWithHint("Show Floating Stopwatch", "Right-click it to customize")
         floatingItem.action = #selector(toggleFloating)
         floatingItem.state = showFloating ? .on : .off
@@ -555,7 +545,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         floatingResetItem.action = #selector(resetAction)
         floatingMenu.addItem(floatingResetItem)
         addTimerAndSoundItems(to: floatingMenu)
-        floatingMenu.addItem(.separator())
+        addClickModeItems(to: floatingMenu)
         // Translucent Blur needs macOS 26: hide it before that, and move a saved choice to Dark Background
         let glassAvailable: Bool
         if #available(macOS 26, *) { glassAvailable = true } else { glassAvailable = false }
@@ -605,7 +595,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registerHotKey()
     }
 
-    // ⌥\ anywhere acts like a plain left click, ⌥⇧\ like a ⌥+click.
+    // ⌥\ anywhere acts like a plain left click, ⌥⇧\ like a ⌥+click; a quick double press resets like a double click.
     // Carbon hot keys: no Accessibility permission needed, and they swallow the keystroke.
     private func registerHotKey() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -614,7 +604,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                               nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
             let delegate = Unmanaged<AppDelegate>.fromOpaque(userData!).takeUnretainedValue()
-            delegate.toggle(optionHeld: hotKeyID.id == 2)
+            delegate.leftClick(optionHeld: hotKeyID.id == 2)
             return noErr
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), nil)
         var ref: EventHotKeyRef?
@@ -638,6 +628,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !name.isEmpty else { return nil }
         if let sound = NSSound(named: name) { return sound } // system sounds like Ping
         return NSSound(contentsOf: toneLibrary.appendingPathComponent(name + ".caf"), byReference: true)
+    }
+
+    // between dividers; in both menus, each with its own copies
+    private func addClickModeItems(to menu: NSMenu) {
+        menu.addItem(.separator())
+        for (title, subtitle, tag) in [("Click to Start from Zero", "⌥+click to resume", 1),
+                                       ("Click to Start or Resume", "⌥+click to start from zero", 0)] {
+            let item = NSMenuItem(title: title, action: #selector(selectClickMode), keyEquivalent: "")
+            item.attributedTitle = Self.titleWithHint(title, subtitle)
+            item.tag = tag
+            item.state = (tag == 1) == reverseClickActions ? .on : .off
+            menu.addItem(item)
+            clickModeItems.append(item)
+        }
+        menu.addItem(.separator())
     }
 
     private func addTimerAndSoundItems(to menu: NSMenu) {
