@@ -17,7 +17,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/$BIN" "$APP/Contents/MacOS/$BIN"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-cp Resources/AppIcon.icns "$APP/Contents/Resources/"
+# Liquid Glass icon (Assets.car) on macOS 26+, plus an .icns fallback for older systems
+xcrun actool icon/HourglassGlass.icon --compile "$APP/Contents/Resources" --app-icon HourglassGlass \
+    --platform macosx --minimum-deployment-target 12.0 --output-partial-info-plist /dev/null >/dev/null
 # ponytail: ad-hoc signature only; a Developer ID signature + notarization removes the first-launch warning
 codesign --force --sign - "$APP"
 

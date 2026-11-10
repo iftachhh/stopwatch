@@ -7,7 +7,9 @@
 	<key>CFBundleExecutable</key>
 	<string>StopwatchMenuBar</string>
 	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
+	<string>HourglassGlass</string>
+	<key>CFBundleIconName</key>
+	<string>HourglassGlass</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.iftach.stopwatch</string>
 	<key>CFBundleName</key>
@@ -15,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.2</string>
+	<string>1.3</string>
 	<key>CFBundleVersion</key>
-	<string>3</string>
+	<string>4</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>12.0</string>
 	<key>LSUIElement</key>
